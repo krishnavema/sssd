@@ -367,6 +367,13 @@ int main(int argc, const char *argv[])
         timeout = -1;
     }
 
+    /* When soft_ocsp is enabled and no timeout was specified, use a sensible
+     * default so that the OCSP connect does not block indefinitely when the
+     * responder is unreachable (RHEL-5043). */
+    if (cert_verify_opts->soft_ocsp && timeout == -1) {
+        timeout = 10;
+    }
+
     ret = do_work(main_ctx, mode, ca_db, cert_verify_opts, wait_for_card,
                   cert_b64, pin, module_name, token_name, key_id, label, uri,
                   timeout, &multi);

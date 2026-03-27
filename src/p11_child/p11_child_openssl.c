@@ -43,7 +43,7 @@ struct p11_ctx {
     const char *ca_db;
     bool wait_for_card;
     struct cert_verify_opts *cert_verify_opts;
-    time_t ocsp_deadline;
+    time_t timeout;
 };
 
 static OCSP_RESPONSE *query_responder(BIO *cbio, const char *host,
@@ -381,14 +381,12 @@ static errno_t do_ocsp(struct p11_ctx *p11_ctx, X509 *cert)
 
     OCSP_request_add1_nonce(ocsp_req, NULL, -1);
 
-    if (p11_ctx->ocsp_deadline != -1  && p11_ctx->cert_verify_opts->soft_ocsp) {
-        req_timeout = p11_ctx->ocsp_deadline - time(NULL);
-        if (req_timeout <= 0) {
-            /* no time left for OCSP */
-            DEBUG(SSSDBG_TRACE_INTERNAL,
-                  "Timeout before we could run OCSP request.\n");
-            req_timeout = 0;
-        }
+    if (p11_ctx->cert_verify_opts->soft_ocsp) {
+        /* soft_ocsp requires a finite timeout so that p11_child does not
+         * block indefinitely when the OCSP responder is unreachable.
+         * The timeout is guaranteed to be >= 0 at this point because
+         * main() sets it to 10 when soft_ocsp is enabled (RHEL-5043). */
+        req_timeout = (int)p11_ctx->timeout;
     }
     if (req_timeout != 0) {
         ocsp_resp = process_responder(ocsp_req, host, path, port, use_ssl,
@@ -594,16 +592,6 @@ errno_t init_p11_ctx(TALLOC_CTX *mem_ctx, const char *ca_db,
         return ENOMEM;
     }
 
-    if (timeout == 1) {
-        /* timeout of 1 sec is too short (see -1 in deadline calculation),
-         * increasing to 2 and hope that the ocsp operation finishes
-         * before p11_child is terminated.
-         */
-        timeout = 2;
-    }
-    /* timeout <= 0 means no timeout specified */
-    ctx->ocsp_deadline = timeout > 0 ? time(NULL) + timeout - 1 : -1;
-
     /* See https://wiki.openssl.org/index.php/Library_Initialization for
      * details. */
     ret = OPENSSL_init_ssl(0, NULL);
@@ -615,6 +603,7 @@ errno_t init_p11_ctx(TALLOC_CTX *mem_ctx, const char *ca_db,
 
     ctx->ca_db = ca_db;
     ctx->wait_for_card = wait_for_card;
+    ctx->timeout = timeout;
     talloc_set_destructor(ctx, p11_ctx_destructor);
 
     *p11_ctx = ctx;
