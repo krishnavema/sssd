@@ -9,10 +9,8 @@ import tempfile
 import subprocess
 import socket
 import time
-import ldap
 from sssd.testlib.common.exceptions import DirSrvException
 from sssd.testlib.common.exceptions import LdapException
-from sssd.testlib.common.utils import LdapOperations
 
 DS_USER = 'dirsrv'
 DS_GROUP = 'dirsrv'
@@ -249,17 +247,26 @@ class DirSrv(object):
         Exceptions:
             LdapException
         """
-        ldap_obj = LdapOperations(uri=binduri, binddn=self.dsrootdn,
-                                  bindpw=self.dsrootdn_pwd)
-        # Enable Anonymous access aci
-        allow_anonymous = "(targetattr!=\"userPassword || aci\")" \
-                          "(version 3.0; acl \"Enable anonymous access\";" \
-                          "allow (read, search, compare)" \
-                          "userdn=\"ldap:///anyone\";)"
-        add_aci = [(ldap.MOD_ADD, 'aci', [allow_anonymous.encode('utf-8')])]
-        (ret, return_value) = ldap_obj.modify_ldap(self.dsinstance_suffix,
-                                                   add_aci)
-        if not return_value:
+        allow_anonymous = '(targetattr!="userPassword || aci")' \
+                          '(version 3.0; acl "Enable anonymous access";' \
+                          'allow (read, search, compare)' \
+                          'userdn="ldap:///anyone";)'
+        ldif_content = (
+            'dn: %s\n'
+            'changetype: modify\n'
+            'add: aci\n'
+            'aci: %s\n' % (self.dsinstance_suffix, allow_anonymous)
+        )
+        ldapmodify_cmd = (
+            'ldapmodify -x -H ldap://localhost:%s '
+            '-D "%s" -w "%s"'
+            % (self.dsldap_port, self.dsrootdn, self.dsrootdn_pwd)
+        )
+        try:
+            self.multihost.run_command(
+                ldapmodify_cmd, stdin_text=ldif_content
+            )
+        except subprocess.CalledProcessError:
             raise LdapException("Failed to enable anonymous access aci")
         else:
             print("Enabled Anonymous access aci to %s" %
@@ -278,45 +285,42 @@ class DirSrv(object):
         Exceptions:
             LdapException
         """
-        ldap_obj = LdapOperations(uri=binduri, binddn=self.dsrootdn,
-                                  bindpw=self.dsrootdn_pwd)
-        # Enable TLS
-        mod_dn1 = 'cn=encryption,cn=config'
-        add_tls = [(ldap.MOD_ADD, 'nsTLS1', [b'on'])]
-        (ret, return_value) = ldap_obj.modify_ldap(mod_dn1, add_tls)
-        if not return_value:
-            raise LdapException('Failed to enable TLS, Error:%s' % (ret))
+        ldif_content = (
+            'dn: cn=encryption,cn=config\n'
+            'changetype: modify\n'
+            'add: nsTLS1\n'
+            'nsTLS1: on\n'
+            '\n'
+            'dn: cn=RSA,cn=encryption,cn=config\n'
+            'changetype: modify\n'
+            'replace: nsSSLPersonalitySSL\n'
+            'nsSSLPersonalitySSL: Server-Cert-{host}\n'
+            '\n'
+            'dn: cn=config\n'
+            'changetype: modify\n'
+            'replace: nsslapd-security\n'
+            'nsslapd-security: on\n'
+            '\n'
+            'dn: cn=config\n'
+            'changetype: modify\n'
+            'replace: nsslapd-securePort\n'
+            'nsslapd-securePort: {tls_port}\n'
+        ).format(host=self.dsinstance_host, tls_port=tls_port)
+        ldapmodify_cmd = (
+            'ldapmodify -x -H ldap://localhost:%s '
+            '-D "%s" -w "%s"'
+            % (self.dsldap_port, self.dsrootdn, self.dsrootdn_pwd)
+        )
+        try:
+            self.multihost.run_command(
+                ldapmodify_cmd, stdin_text=ldif_content
+            )
+        except subprocess.CalledProcessError:
+            raise LdapException('Failed to enable SSL')
         else:
             print('Enabled nsTLS1=on')
-        mod_dn2 = 'cn=RSA,cn=encryption,cn=config'
-        mod_security = [(ldap.MOD_REPLACE, 'nsSSLPersonalitySSL',
-                         [b'Server-Cert-%s' %
-                          ((self.dsinstance_host.encode()))])]
-        (ret, return_value) = ldap_obj.modify_ldap(mod_dn2, mod_security)
-        if not return_value:
-            raise LdapException('Failed to set Server-Cert nick:%s' % (ret))
-        else:
             print('Enabled Server-Cert nick')
-
-        # Enable security
-        mod_dn3 = 'cn=config'
-        enable_security = [(ldap.MOD_REPLACE, 'nsslapd-security', [b'on'])]
-        (ret, return_value) = ldap_obj.modify_ldap(mod_dn3, enable_security)
-        if not return_value:
-            raise LdapException(
-                'Failed to enable nsslapd-security, Error:%s' % (ret))
-        else:
             print('Enabled nsslapd-security')
-
-        # set the appropriate TLS port
-        mod_dn4 = 'cn=config'
-        enable_ssl_port = [(ldap.MOD_REPLACE, 'nsslapd-securePort',
-                            str(tls_port).encode())]
-        (ret, return_value) = ldap_obj.modify_ldap(mod_dn4, enable_ssl_port)
-        if not return_value:
-            raise LdapException(
-                'Failed to set nsslapd-securePort, Error:%s' % (ret))
-        else:
             print('Enabled nsslapd-securePort=%r' % tls_port)
 
 
