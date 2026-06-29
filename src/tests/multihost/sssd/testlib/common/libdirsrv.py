@@ -258,9 +258,9 @@ class DirSrv(object):
             'aci: %s\n' % (self.dsinstance_suffix, allow_anonymous)
         )
         ldapmodify_cmd = (
-            'ldapmodify -x -H ldap://localhost:%s '
+            'ldapmodify -x -H %s '
             '-D "%s" -w "%s"'
-            % (self.dsldap_port, self.dsrootdn, self.dsrootdn_pwd)
+            % (binduri, self.dsrootdn, self.dsrootdn_pwd)
         )
         try:
             self.multihost.run_command(
@@ -307,9 +307,9 @@ class DirSrv(object):
             'nsslapd-securePort: {tls_port}\n'
         ).format(host=self.dsinstance_host, tls_port=tls_port)
         ldapmodify_cmd = (
-            'ldapmodify -x -H ldap://localhost:%s '
+            'ldapmodify -x -H %s '
             '-D "%s" -w "%s"'
-            % (self.dsldap_port, self.dsrootdn, self.dsrootdn_pwd)
+            % (binduri, self.dsrootdn, self.dsrootdn_pwd)
         )
         try:
             self.multihost.run_command(
